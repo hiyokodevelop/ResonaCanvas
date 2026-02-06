@@ -1,0 +1,7 @@
+{
+  "name": "ResonaCanvas",
+  "description": "A sophisticated AI tool that blends multiple visual concepts into a single coherent image based on weighted influence scores. Powered by Gemini 3 and Gemini 2.5 Flash Image.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
