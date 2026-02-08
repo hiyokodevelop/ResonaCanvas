@@ -40,21 +40,23 @@ const App: React.FC = () => {
     targetImageId?: string 
   } | null>(null);
 
-  // 初期状態をfalseにし、必ずチェックを走らせる
+  // 初期状態をfalseにする
   const [hasKey, setHasKey] = useState<boolean>(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
 
-  // APIキーの選択状態を厳格にチェックする
+  // APIキーの選択状態をチェックする
   const checkKey = useCallback(async () => {
     try {
-      if ((window as any).aistudio?.hasSelectedApiKey) {
+      if (typeof (window as any).aistudio?.hasSelectedApiKey === 'function') {
         const has = await (window as any).aistudio.hasSelectedApiKey();
         setHasKey(has);
       } else {
-        // aistudioオブジェクトが存在しない場合は、キーがないものとして扱う
+        // AI Studio環境以外（ローカル開発など）では、環境変数があれば許可するなどのフォールバックが必要な場合もありますが、
+        // 今回は「必ずセットさせる」という要件に従い、APIが存在しない場合はキーなしとして扱います。
         setHasKey(false);
       }
     } catch (e) {
+      console.error("Key check failed", e);
       setHasKey(false);
     } finally {
       setIsInitialLoading(false);
@@ -62,20 +64,30 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    // 起動時にキーチェックを実行
     checkKey();
   }, [checkKey]);
 
   // APIキー選択ダイアログを開く
   const handleOpenKeySelection = async () => {
-    if ((window as any).aistudio?.openSelectKey) {
+    if (typeof (window as any).aistudio?.openSelectKey === 'function') {
       try {
+        // ダイアログを開く
         await (window as any).aistudio.openSelectKey();
-        // ガイドラインに従い、呼び出し後は成功したとみなして進む
+        
+        /**
+         * 重要: ガイドラインに従い、openSelectKeyを呼び出した後は成功したとみなして
+         * 即座にアプリを続行させる。hasSelectedApiKeyの更新を待つとレースコンディションで止まる可能性がある。
+         */
         setHasKey(true);
         setError(null);
       } catch (e) {
         console.error("Failed to open key selection", e);
+        // エラーが発生しても、再度ボタンを押せるように状態は維持する
       }
+    } else {
+      console.warn("aistudio.openSelectKey is not available in this environment.");
+      // 開発環境などでAPIがない場合でも、検証用に通したい場合はここを調整
     }
   };
 
@@ -207,9 +219,9 @@ const App: React.FC = () => {
   };
 
   const synthesizeAtPos = async (posX: number, posY: number, size: number) => {
-    // 実行直前にもう一度厳格にチェック
+    // 実行直前にもチェック
     if (!hasKey) {
-      setError("Please set your API key to continue.");
+      setError("Please connect your API key to synthesize.");
       handleOpenKeySelection();
       return;
     }
@@ -267,6 +279,7 @@ const App: React.FC = () => {
     setImages(prev => [...prev, placeholder]);
 
     try {
+      // 内部で毎回GoogleGenAIをインスタンス化
       const prompt = await geminiService.generateSynthesisPrompt(scoredImages);
       setLoadingStep(LoadingStep.GENERATING);
       const imageUrl = await geminiService.generateImage(prompt, settings.model, settings.aspectRatio);
@@ -282,8 +295,9 @@ const App: React.FC = () => {
       } : img));
       setLoadingStep(LoadingStep.COMPLETED);
     } catch (err: any) {
-      if (err.message?.includes("Requested entity was not found.")) {
-        setError("API Key Error. Please re-select your paid project key.");
+      // エンティティが見つからないエラーはキーの問題であることが多い
+      if (err.message?.includes("Requested entity was not found") || err.message?.includes("API_KEY")) {
+        setError("API Key verification failed. Please re-select a valid paid project key.");
         setHasKey(false);
       } else {
         setError(err.message || "Synthesis failed.");
@@ -356,7 +370,10 @@ const App: React.FC = () => {
   if (isInitialLoading) {
     return (
       <div className="h-screen w-screen bg-slate-950 flex items-center justify-center">
-        <div className="h-8 w-8 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-10 w-10 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+          <span className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Initializing Engine</span>
+        </div>
       </div>
     );
   }
@@ -364,37 +381,38 @@ const App: React.FC = () => {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-950 text-slate-100 font-sans">
       
-      {/* API Key Connection Overlay - Mandatory for all models */}
+      {/* API Key Connection Overlay - Mandatory bypass env */}
       {!hasKey && (
-        <div className="fixed inset-0 z-[1000] bg-slate-950/90 backdrop-blur-2xl flex items-center justify-center p-6 animate-in fade-in duration-700">
-          <div className="max-w-md w-full bg-slate-900 border border-indigo-500/30 rounded-3xl p-10 shadow-[0_0_80px_rgba(99,102,241,0.25)] text-center flex flex-col items-center gap-8">
-            <div className="w-24 h-24 bg-indigo-600/20 rounded-[2.5rem] flex items-center justify-center text-indigo-400 shadow-inner">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="fixed inset-0 z-[1000] bg-slate-950 flex items-center justify-center p-6 animate-in fade-in duration-700">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.15)_0%,transparent_70%)]"></div>
+          <div className="relative max-w-md w-full bg-slate-900 border border-indigo-500/30 rounded-[2.5rem] p-12 shadow-[0_0_100px_rgba(99,102,241,0.2)] text-center flex flex-col items-center gap-10">
+            <div className="w-28 h-28 bg-indigo-600/20 rounded-[3rem] flex items-center justify-center text-indigo-400 shadow-inner group transition-transform hover:scale-110 duration-500">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-14 w-14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
               </svg>
             </div>
             <div className="space-y-4">
-              <h2 className="text-3xl font-heading font-black tracking-tight text-white uppercase leading-none">ResonaCanvas</h2>
-              <div className="h-1 w-12 bg-indigo-500 mx-auto rounded-full"></div>
-              <p className="text-slate-400 text-sm leading-relaxed max-w-[280px] mx-auto">
-                Authentication required. To manifest visual fusions, please connect your Gemini API key.
+              <h2 className="text-4xl font-heading font-black tracking-tighter text-white uppercase leading-none">ResonaCanvas</h2>
+              <div className="h-1 w-16 bg-indigo-500 mx-auto rounded-full"></div>
+              <p className="text-slate-400 text-sm leading-relaxed max-w-[300px] mx-auto font-medium">
+                Authentication Required. Please connect your Gemini API key to manifest visual fusions.
               </p>
             </div>
             <button 
               onClick={handleOpenKeySelection}
-              className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-widest rounded-2xl transition-all shadow-xl hover:shadow-indigo-500/30 active:scale-95 flex items-center justify-center gap-3"
+              className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-widest rounded-3xl transition-all shadow-2xl hover:shadow-indigo-500/40 active:scale-95 flex items-center justify-center gap-4"
             >
-              Start Engine
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              Connect API Key
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
               </svg>
             </button>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
               <a 
                 href="https://ai.google.dev/gemini-api/docs/billing" 
                 target="_blank" 
                 rel="noopener noreferrer"
-                className="text-[10px] text-slate-500 hover:text-indigo-400 transition-colors flex items-center gap-1 justify-center"
+                className="text-[10px] text-slate-500 hover:text-indigo-400 transition-colors flex items-center gap-2 justify-center font-bold"
               >
                 Learn about paid project keys
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
