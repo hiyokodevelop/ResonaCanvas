@@ -23,6 +23,7 @@ The resulting image MUST feature exactly ONE central subject (one person, one ch
 
 export class GeminiService {
   async generateSynthesisPrompt(images: ReferenceImage[]): Promise<string> {
+    // ALWAYS create a new instance inside the method to use the most up-to-date process.env.API_KEY
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
     
     const parts = images.map((img) => ([
@@ -48,7 +49,7 @@ export class GeminiService {
   }
 
   async generateImage(prompt: string, model: ImageModel, aspectRatio: AspectRatio): Promise<string> {
-    // Guidelines: Always create a fresh instance before making an API call to ensure latest API key is used
+    // ALWAYS create a new instance inside the method to use the most up-to-date process.env.API_KEY
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
     if (model === 'imagen-4.0-generate-001') {
