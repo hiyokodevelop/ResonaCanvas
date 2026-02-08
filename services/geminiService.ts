@@ -21,10 +21,9 @@ The resulting image MUST feature exactly ONE central subject (one person, one ch
 - No meta-commentary.`;
 
 export class GeminiService {
-  // ... (generateSynthesisPrompt はそのままでOK) ...
+
   async generateSynthesisPrompt(images: ReferenceImage[], apiKey: string): Promise<string> {
-      // ... (省略: 先ほど修正した通り) ...
-      // ※ここは generateContent のままでOKです（テキスト生成なので）
+
       const effectiveKey = apiKey || process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.API_KEY || "";
       if (!effectiveKey) throw new Error("API Key is missing.");
       const ai = new GoogleGenAI({ apiKey: effectiveKey });
@@ -35,18 +34,18 @@ export class GeminiService {
       ])).flat();
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview', // テキスト生成はGemini 3でOK
+        model: 'gemini-3-pro-preview',
         contents: [{ role: 'user', parts: parts }],
         config: { systemInstruction: SYSTEM_INSTRUCTION, temperature: 0.9 },
       });
       
-      // テキスト取得部分の安全策
+
       const candidate = response.candidates?.[0];
       const textPart = candidate?.content?.parts?.find(p => p.text);
       return textPart?.text?.trim() || "A fusion of concepts.";
   }
 
-  // ★ここを修正します★
+
   async generateImage(prompt: string, model: ImageModel, aspectRatio: AspectRatio, apiKey: string): Promise<string> {
     const effectiveKey = apiKey || process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.API_KEY || "";
     if (!effectiveKey) throw new Error("API Key is missing.");
@@ -54,23 +53,19 @@ export class GeminiService {
     const ai = new GoogleGenAI({ apiKey: effectiveKey });
 
     try {
-      // 修正: モデル名に関わらず、画像生成はすべて `generateImages` メソッドを使います。
-      // Gemini 3 Pro や Imagen 4 はこのメソッドに対応しています。
+
       
       const response = await ai.models.generateImages({
-        model: model, // 画面で選ばれたモデル（gemini-3-pro-preview や imagen-4.0 等）をそのまま使う
+        model: model,
         prompt: prompt,
         config: {
           numberOfImages: 1,
           // アスペクト比の設定
           aspectRatio: aspectRatio === '1:1' ? '1:1' : aspectRatio === '16:9' ? '16:9' : aspectRatio === '9:16' ? '9:16' : '4:3',
-          // Gemini系で画像生成する場合、パラメータ名が違う可能性があるため念のため
-          // outputMimeType: "image/png" などを指定する場合もありますが、
-          // 最新SDKなら generateImages だけで通るはずです。
-        },
+
       });
 
-      // レスポンスから画像を取り出す
+
       if (response.generatedImages && response.generatedImages.length > 0) {
         const base64 = response.generatedImages[0].image.imageBytes;
         return `data:image/png;base64,${base64}`;
@@ -81,8 +76,7 @@ export class GeminiService {
     } catch (error: any) {
         console.error("Image Generation Error:", error);
         
-        // もしGeminiモデルが generateImages に未対応（テキスト専用）だった場合のフォールバック
-        // その場合は Imagen 4 に切り替えて再トライするロジックを入れておくと親切です
+       
         if (error.message?.includes("not supported") || error.message?.includes("404")) {
             console.warn("Model doesn't support generateImages, falling back to Imagen 4");
             return this.generateImage(prompt, 'imagen-4.0-generate-001' as ImageModel, aspectRatio, apiKey);
