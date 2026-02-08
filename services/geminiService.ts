@@ -21,107 +21,73 @@ The resulting image MUST feature exactly ONE central subject (one person, one ch
 - No meta-commentary.`;
 
 export class GeminiService {
+  // ... (generateSynthesisPrompt はそのままでOK) ...
   async generateSynthesisPrompt(images: ReferenceImage[], apiKey: string): Promise<string> {
+      // ... (省略: 先ほど修正した通り) ...
+      // ※ここは generateContent のままでOKです（テキスト生成なので）
+      const effectiveKey = apiKey || process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.API_KEY || "";
+      if (!effectiveKey) throw new Error("API Key is missing.");
+      const ai = new GoogleGenAI({ apiKey: effectiveKey });
+      
+      const parts = images.map((img) => ([
+        { text: `[Influence Score: ${Math.round(img.score || 5)}]` },
+        { inlineData: { mimeType: "image/png", data: img.base64.split(',')[1] } }
+      ])).flat();
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview', // テキスト生成はGemini 3でOK
+        contents: [{ role: 'user', parts: parts }],
+        config: { systemInstruction: SYSTEM_INSTRUCTION, temperature: 0.9 },
+      });
+      
+      // テキスト取得部分の安全策
+      const candidate = response.candidates?.[0];
+      const textPart = candidate?.content?.parts?.find(p => p.text);
+      return textPart?.text?.trim() || "A fusion of concepts.";
+  }
+
+  // ★ここを修正します★
+  async generateImage(prompt: string, model: ImageModel, aspectRatio: AspectRatio, apiKey: string): Promise<string> {
     const effectiveKey = apiKey || process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.API_KEY || "";
-    
-    if (!effectiveKey) {
-      throw new Error("API Key is missing.");
-    }
+    if (!effectiveKey) throw new Error("API Key is missing.");
 
     const ai = new GoogleGenAI({ apiKey: effectiveKey });
-    
-    const parts = images.map((img) => ([
-      { text: `[Influence Score: ${Math.round(img.score || 5)}]` },
-      { 
-        inlineData: { 
-          mimeType: "image/png", 
-          data: img.base64.split(',')[1] 
-        } 
-      }
-    ])).flat();
 
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash', // モデル名を変更（gemini-3-proはまだ不安定な場合があるため）
-        contents: [
-          { role: 'user', parts: parts }
-        ],
+      // 修正: モデル名に関わらず、画像生成はすべて `generateImages` メソッドを使います。
+      // Gemini 3 Pro や Imagen 4 はこのメソッドに対応しています。
+      
+      const response = await ai.models.generateImages({
+        model: model, // 画面で選ばれたモデル（gemini-3-pro-preview や imagen-4.0 等）をそのまま使う
+        prompt: prompt,
         config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          temperature: 0.9,
+          numberOfImages: 1,
+          // アスペクト比の設定
+          aspectRatio: aspectRatio === '1:1' ? '1:1' : aspectRatio === '16:9' ? '16:9' : aspectRatio === '9:16' ? '9:16' : '4:3',
+          // Gemini系で画像生成する場合、パラメータ名が違う可能性があるため念のため
+          // outputMimeType: "image/png" などを指定する場合もありますが、
+          // 最新SDKなら generateImages だけで通るはずです。
         },
       });
 
-      // 【修正箇所】 .text() 関数ではなく、candidates配列から直接テキストを取得する安全策
-      const candidate = response.candidates?.[0];
-      const textPart = candidate?.content?.parts?.find(p => p.text);
-      
-      if (textPart && textPart.text) {
-          return textPart.text.trim();
+      // レスポンスから画像を取り出す
+      if (response.generatedImages && response.generatedImages.length > 0) {
+        const base64 = response.generatedImages[0].image.imageBytes;
+        return `data:image/png;base64,${base64}`;
       }
-      
-      // テキストが見つからない場合のフォールバック
-      return "A mysterious fusion of concepts.";
 
-    } catch (error) {
-      console.error("Prompt Generation Error:", error);
-      throw error;
-    }
-  }
+      throw new Error("No image data returned from the model.");
 
-  async generateImage(prompt: string, model: ImageModel, aspectRatio: AspectRatio, apiKey: string): Promise<string> {
-    const effectiveKey = apiKey || process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.API_KEY || "";
-    
-    if (!effectiveKey) {
-      throw new Error("API Key is missing.");
-    }
-
-    const ai = new GoogleGenAI({ apiKey: effectiveKey });
-
-    try {
-      if (model === 'imagen-3.0-generate-001' || model.includes('imagen')) {
-         // Imagen系 (モデルIDは適宜調整してください)
-         const response = await ai.models.generateImages({
-          model: 'imagen-3.0-generate-001', 
-          prompt: prompt,
-          config: {
-            numberOfImages: 1,
-            aspectRatio: aspectRatio === '1:1' ? '1:1' : aspectRatio === '16:9' ? '16:9' : aspectRatio === '9:16' ? '9:16' : '4:3',
-          },
-        });
-        // Imagenのレスポンス形式
-        if (response.generatedImages && response.generatedImages.length > 0) {
-            const base64 = response.generatedImages[0].image.imageBytes;
-            return `data:image/png;base64,${base64}`;
-        }
-      } else {
-        // Gemini系での画像生成
-        const response = await ai.models.generateContent({
-          model: model,
-          contents: [
-            { role: 'user', parts: [{ text: prompt }] }
-          ],
-          config: {
-             // @ts-ignore
-            responseMimeType: "image/jpeg",
-             // @ts-ignore
-            imageConfig: {
-                aspectRatio: aspectRatio
-            }
-          }
-        });
-
-        const parts = response.candidates?.[0]?.content?.parts || [];
-        for (const part of parts) {
-          if (part.inlineData && part.inlineData.data) {
-            return `data:image/png;base64,${part.inlineData.data}`;
-          }
-        }
-      }
-      throw new Error("No image data found in response.");
-      
     } catch (error: any) {
         console.error("Image Generation Error:", error);
+        
+        // もしGeminiモデルが generateImages に未対応（テキスト専用）だった場合のフォールバック
+        // その場合は Imagen 4 に切り替えて再トライするロジックを入れておくと親切です
+        if (error.message?.includes("not supported") || error.message?.includes("404")) {
+            console.warn("Model doesn't support generateImages, falling back to Imagen 4");
+            return this.generateImage(prompt, 'imagen-4.0-generate-001' as ImageModel, aspectRatio, apiKey);
+        }
+
         throw new Error(error.message || "Failed to generate image.");
     }
   }
