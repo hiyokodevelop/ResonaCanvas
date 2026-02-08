@@ -447,7 +447,7 @@ const App: React.FC = () => {
       <main 
         ref={boardRef}
         className={`flex-1 relative overflow-hidden outline-none transition-colors duration-500 ${isOverBoard ? 'bg-indigo-950/20' : 'bg-slate-950'}`}
-        onWheel={handleWheel}
+        // onWheel={handleWheel}
         onMouseMove={handleBoardMouseMove}
         onMouseDown={handleBoardMouseDown}
         onContextMenu={handleContextMenu}
