@@ -296,7 +296,17 @@ const App: React.FC = () => {
       setLoadingStep(LoadingStep.ERROR);
     }
   };
+  useEffect(() => {
+    const board = boardRef.current;
+    if (!board) return;
 
+    // { passive: false } を指定することで e.preventDefault() が効くようになる
+    board.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => {
+      board.removeEventListener('wheel', handleWheel);
+    };
+  }, [handleWheel]);
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isCtrl = e.ctrlKey || e.metaKey;
