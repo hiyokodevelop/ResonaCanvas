@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { ReferenceImage, ImageModel, AspectRatio } from "../types";
 
@@ -22,9 +21,20 @@ The resulting image MUST feature exactly ONE central subject (one person, one ch
 - No meta-commentary.`;
 
 export class GeminiService {
-  async generateSynthesisPrompt(images: ReferenceImage[]): Promise<string> {
-    // ALWAYS create a new instance inside the method to use the most up-to-date process.env.API_KEY
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+  /**
+   * 画像と影響度スコアからプロンプトを生成する
+   * @param apiKey ユーザー入力または環境変数のAPIキー
+   */
+  async generateSynthesisPrompt(images: ReferenceImage[], apiKey: string): Promise<string> {
+    // 優先順位: 引数(ユーザー入力) > NEXT_PUBLIC環境変数 > 通常の環境変数
+    const effectiveKey = apiKey || process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.API_KEY || "";
+    
+    if (!effectiveKey) {
+      throw new Error("API Key is missing. Please set your key in the settings.");
+    }
+
+    // クライアントを都度初期化
+    const ai = new GoogleGenAI({ apiKey: effectiveKey });
     
     const parts = images.map((img) => ([
       { text: `[Influence Score: ${Math.round(img.score || 5)}]` },
@@ -36,55 +46,80 @@ export class GeminiService {
       }
     ])).flat();
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: { parts },
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.9,
-      },
-    });
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview', // 必要に応じて 'gemini-2.0-flash' 等に変更
+        contents: [
+          { role: 'user', parts: parts }
+        ],
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          temperature: 0.9,
+        },
+      });
 
-    return response.text?.trim() || "A dreamlike fusion of light and form.";
+      return response.text()?.trim() || "A dreamlike fusion of light and form.";
+    } catch (error) {
+      console.error("Prompt Generation Error:", error);
+      throw error;
+    }
   }
 
-  async generateImage(prompt: string, model: ImageModel, aspectRatio: AspectRatio): Promise<string> {
-    // ALWAYS create a new instance inside the method to use the most up-to-date process.env.API_KEY
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-
-    if (model === 'imagen-4.0-generate-001') {
-      const response = await ai.models.generateImages({
-        model: model,
-        prompt: prompt,
-        config: {
-          numberOfImages: 1,
-          aspectRatio: aspectRatio === '1:1' ? '1:1' : aspectRatio === '16:9' ? '16:9' : aspectRatio === '9:16' ? '9:16' : '4:3',
-        },
-      });
-      const base64 = response.generatedImages[0].image.imageBytes;
-      return `data:image/png;base64,${base64}`;
-    } else {
-      // Gemini Flash/Pro Image series (Nano Banana)
-      const response = await ai.models.generateContent({
-        model: model,
-        contents: {
-          parts: [{ text: prompt }]
-        },
-        config: {
-          imageConfig: {
-            aspectRatio: aspectRatio
-          }
-        }
-      });
-
-      for (const part of response.candidates?.[0]?.content?.parts || []) {
-        if (part.inlineData) {
-          return `data:image/png;base64,${part.inlineData.data}`;
-        }
-      }
+  /**
+   * 画像生成を実行する
+   * @param apiKey ユーザー入力または環境変数のAPIキー
+   */
+  async generateImage(prompt: string, model: ImageModel, aspectRatio: AspectRatio, apiKey: string): Promise<string> {
+    const effectiveKey = apiKey || process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.API_KEY || "";
+    
+    if (!effectiveKey) {
+      throw new Error("API Key is missing. Please set your key in the settings.");
     }
 
-    throw new Error("The synthesis engine failed to manifest the visual. Please check your API key or try again.");
+    const ai = new GoogleGenAI({ apiKey: effectiveKey });
+
+    try {
+      if (model === 'imagen-4.0-generate-001') {
+        // Imagen 3/4 系
+        const response = await ai.models.generateImages({
+          model: model,
+          prompt: prompt,
+          config: {
+            numberOfImages: 1,
+            aspectRatio: aspectRatio === '1:1' ? '1:1' : aspectRatio === '16:9' ? '16:9' : aspectRatio === '9:16' ? '9:16' : '4:3',
+          },
+        });
+        const base64 = response.generatedImages[0].image.imageBytes;
+        return `data:image/png;base64,${base64}`;
+      } else {
+        // Gemini Flash/Pro Image series (Nano Banana)
+        const response = await ai.models.generateContent({
+          model: model,
+          contents: [
+            { role: 'user', parts: [{ text: prompt }] }
+          ],
+          config: {
+            // @ts-ignore: SDKのバージョンによっては型定義が追いついていない場合があるため
+            imageConfig: {
+              aspectRatio: aspectRatio
+            }
+          }
+        });
+
+        // レスポンスから画像データを探す
+        const parts = response.candidates?.[0]?.content?.parts || [];
+        for (const part of parts) {
+          if (part.inlineData && part.inlineData.data) {
+            return `data:image/png;base64,${part.inlineData.data}`;
+          }
+        }
+        
+        throw new Error("No image data found in response.");
+      }
+    } catch (error: any) {
+        console.error("Image Generation Error:", error);
+        throw new Error(error.message || "The synthesis engine failed to manifest the visual.");
+    }
   }
 }
 

@@ -24,6 +24,7 @@ const App: React.FC = () => {
     aspectRatio: '1:1',
     influenceRadius: 1000 
   });
+  const [apiKey, setApiKey] = useState<string>(process.env.NEXT_PUBLIC_GEMINI_API_KEY || "");
   
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 0.8 });
   const [isPanning, setIsPanning] = useState(false);
@@ -68,38 +69,13 @@ const App: React.FC = () => {
     checkKey();
   }, [checkKey]);
 
-  // APIキー選択ダイアログを開く
-  // const handleOpenKeySelection = async () => {
-  //   if (typeof (window as any).aistudio?.openSelectKey === 'function') {
-  //     try {
-  //       // ダイアログを開く
-  //       await (window as any).aistudio.openSelectKey();
-        
-  //       /**
-  //        * 重要: ガイドラインに従い、openSelectKeyを呼び出した後は成功したとみなして
-  //        * 即座にアプリを続行させる。hasSelectedApiKeyの更新を待つとレースコンディションで止まる可能性がある。
-  //        */
-  //       setHasKey(true);
-  //       setError(null);
-  //     } catch (e) {
-  //       console.error("Failed to open key selection", e);
-  //       // エラーが発生しても、再度ボタンを押せるように状態は維持する
-  //     }
-  //   } else {
-  //     console.warn("aistudio.openSelectKey is not available in this environment.");
-  //     // 開発環境などでAPIがない場合でも、検証用に通したい場合はここを調整
-  //   }
-  // };
 
   const handleOpenKeySelection = async () => {
-  // ブラウザの入力ダイアログを表示
+    // ブラウザの入力ダイアログを表示
     const userKey = window.prompt("Gemini APIキーを入力してください（sk-...）");
     
     if (userKey) {
-      // 入力されたキーを保存（コードの他の場所で使うステート変数へ）
-      // 例: setApiKey(userKey); 
-      
-      // 準備完了フラグを立てる
+      setApiKey(userKey); // ★ここを追加：入力されたキーをStateに保存
       setHasKey(true);
       setError(null);
     }
@@ -294,9 +270,9 @@ const App: React.FC = () => {
 
     try {
       // 内部で毎回GoogleGenAIをインスタンス化
-      const prompt = await geminiService.generateSynthesisPrompt(scoredImages);
+      const prompt = await geminiService.generateSynthesisPrompt(scoredImages,apiKey);
       setLoadingStep(LoadingStep.GENERATING);
-      const imageUrl = await geminiService.generateImage(prompt, settings.model, settings.aspectRatio);
+      const imageUrl = await geminiService.generateImage(prompt, settings.model, settings.aspectRatio, apiKey);
       
       setImages(prev => prev.map(img => img.id === genId ? { 
         ...img, 
