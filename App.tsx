@@ -40,16 +40,24 @@ const App: React.FC = () => {
     targetImageId?: string 
   } | null>(null);
 
-  const [hasKey, setHasKey] = useState<boolean | null>(null);
+  // 初期状態をfalseにし、必ずチェックを走らせる
+  const [hasKey, setHasKey] = useState<boolean>(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
 
-  // APIキーの選択状態をチェックする
+  // APIキーの選択状態を厳格にチェックする
   const checkKey = useCallback(async () => {
-    if ((window as any).aistudio?.hasSelectedApiKey) {
-      const has = await (window as any).aistudio.hasSelectedApiKey();
-      setHasKey(has);
-    } else {
-      // 開発環境や非対応環境向け
-      setHasKey(true);
+    try {
+      if ((window as any).aistudio?.hasSelectedApiKey) {
+        const has = await (window as any).aistudio.hasSelectedApiKey();
+        setHasKey(has);
+      } else {
+        // aistudioオブジェクトが存在しない場合は、キーがないものとして扱う
+        setHasKey(false);
+      }
+    } catch (e) {
+      setHasKey(false);
+    } finally {
+      setIsInitialLoading(false);
     }
   }, []);
 
@@ -60,9 +68,14 @@ const App: React.FC = () => {
   // APIキー選択ダイアログを開く
   const handleOpenKeySelection = async () => {
     if ((window as any).aistudio?.openSelectKey) {
-      await (window as any).aistudio.openSelectKey();
-      setHasKey(true);
-      setError(null);
+      try {
+        await (window as any).aistudio.openSelectKey();
+        // ガイドラインに従い、呼び出し後は成功したとみなして進む
+        setHasKey(true);
+        setError(null);
+      } catch (e) {
+        console.error("Failed to open key selection", e);
+      }
     }
   };
 
@@ -194,7 +207,7 @@ const App: React.FC = () => {
   };
 
   const synthesizeAtPos = async (posX: number, posY: number, size: number) => {
-    // すべてのモデルでAPIキーチェックを行う (BYOK強制)
+    // 実行直前にもう一度厳格にチェック
     if (!hasKey) {
       setError("Please set your API key to continue.");
       handleOpenKeySelection();
@@ -340,42 +353,53 @@ const App: React.FC = () => {
   const influenceX = contextMenu ? contextMenu.x : mousePos.x;
   const influenceY = contextMenu ? contextMenu.y : mousePos.y;
 
+  if (isInitialLoading) {
+    return (
+      <div className="h-screen w-screen bg-slate-950 flex items-center justify-center">
+        <div className="h-8 w-8 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-950 text-slate-100 font-sans">
       
-      {/* API Key Connection Overlay */}
-      {hasKey === false && (
-        <div className="fixed inset-0 z-[1000] bg-slate-950/80 backdrop-blur-xl flex items-center justify-center p-6 animate-in fade-in duration-500">
-          <div className="max-w-md w-full bg-slate-900 border border-indigo-500/30 rounded-3xl p-10 shadow-[0_0_50px_rgba(99,102,241,0.2)] text-center flex flex-col items-center gap-8">
-            <div className="w-20 h-20 bg-indigo-600/20 rounded-2xl flex items-center justify-center text-indigo-400">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      {/* API Key Connection Overlay - Mandatory for all models */}
+      {!hasKey && (
+        <div className="fixed inset-0 z-[1000] bg-slate-950/90 backdrop-blur-2xl flex items-center justify-center p-6 animate-in fade-in duration-700">
+          <div className="max-w-md w-full bg-slate-900 border border-indigo-500/30 rounded-3xl p-10 shadow-[0_0_80px_rgba(99,102,241,0.25)] text-center flex flex-col items-center gap-8">
+            <div className="w-24 h-24 bg-indigo-600/20 rounded-[2.5rem] flex items-center justify-center text-indigo-400 shadow-inner">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
               </svg>
             </div>
-            <div className="space-y-3">
-              <h2 className="text-2xl font-heading font-black tracking-tight text-white uppercase">ResonaCanvas Setup</h2>
-              <p className="text-slate-400 text-sm leading-relaxed">
-                To manifest visual fusions, a connection to the Gemini API is required. Please provide your own API key to start the engine.
+            <div className="space-y-4">
+              <h2 className="text-3xl font-heading font-black tracking-tight text-white uppercase leading-none">ResonaCanvas</h2>
+              <div className="h-1 w-12 bg-indigo-500 mx-auto rounded-full"></div>
+              <p className="text-slate-400 text-sm leading-relaxed max-w-[280px] mx-auto">
+                Authentication required. To manifest visual fusions, please connect your Gemini API key.
               </p>
             </div>
             <button 
               onClick={handleOpenKeySelection}
-              className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg hover:shadow-indigo-500/25 active:scale-95 flex items-center justify-center gap-3"
+              className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-widest rounded-2xl transition-all shadow-xl hover:shadow-indigo-500/30 active:scale-95 flex items-center justify-center gap-3"
             >
-              Connect API Key
+              Start Engine
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
               </svg>
             </button>
-            <a 
-              href="https://ai.google.dev/gemini-api/docs/billing" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="text-[10px] text-slate-500 hover:text-indigo-400 transition-colors flex items-center gap-1"
-            >
-              Learn about billing & project keys
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-            </a>
+            <div className="flex flex-col gap-2">
+              <a 
+                href="https://ai.google.dev/gemini-api/docs/billing" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-[10px] text-slate-500 hover:text-indigo-400 transition-colors flex items-center gap-1 justify-center"
+              >
+                Learn about paid project keys
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+              </a>
+            </div>
           </div>
         </div>
       )}
@@ -593,11 +617,11 @@ const App: React.FC = () => {
                   onClick={handleOpenKeySelection}
                   className="w-full flex items-center justify-between px-4 py-3 bg-indigo-600/10 border border-indigo-500/30 rounded-xl text-indigo-400 text-sm font-bold hover:bg-indigo-600/20 transition-all"
                 >
-                  Change API Key
+                  Change Connected Key
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                 </button>
                 <p className="mt-2 text-[10px] text-slate-500 px-1">
-                  Connect your own API key to power all generation tasks.
+                  Securely switch your Gemini API key through the platform dialog.
                 </p>
               </div>
             </div>
